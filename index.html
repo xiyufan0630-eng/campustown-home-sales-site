@@ -53,6 +53,21 @@
     h1 { font-size: 1.75rem; margin: 0 0 0.5rem; }
     .intro { color: var(--text-secondary); margin: 0 0 2rem; }
 
+    /* City filter: one row above the chart */
+    .filter { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0 0 1.5rem; }
+    .filter label { font-weight: 600; }
+    .filter select {
+      font: inherit;
+      min-width: 14rem;
+      max-width: 100%;
+      padding: 0.4rem 0.5rem;
+      color: var(--text-primary);
+      background: var(--page);
+      border: 1px solid var(--baseline);
+      border-radius: 4px;
+    }
+    .filter-count { color: var(--text-secondary); font-size: 0.875rem; }
+
     figure { margin: 0; }
     figcaption { font-weight: 600; margin-bottom: 0.25rem; }
     .subtitle { color: var(--text-secondary); font-size: 0.875rem; margin: 0 0 1.25rem; }
@@ -102,7 +117,14 @@
     .axis-ticks span:last-child { transform: translateX(-100%); }
 
     .row:hover .bar { filter: brightness(1.08); }
-    .row:focus-within { outline: none; }
+
+    /* Table: the same medians as the chart, filtered together with it */
+    .table-wrap { margin-top: 2.5rem; overflow-x: auto; }
+    .table-wrap h2 { font-size: 1.125rem; margin: 0 0 0.5rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--gridline); }
+    th { font-weight: 600; border-bottom-color: var(--baseline); }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
     .status { color: var(--text-secondary); }
     footer { margin-top: 3rem; font-size: 0.875rem; color: var(--text-secondary); }
@@ -112,6 +134,8 @@
       .row, .axis { grid-template-columns: 6rem 1fr 4.25rem; }
       .name { font-size: 0.8125rem; white-space: normal; line-height: 1.2; }
       .axis-ticks span:nth-child(2), .axis-ticks span:nth-child(4) { display: none; }
+      .filter select { min-width: 0; width: 100%; }
+      th, td { padding: 0.35rem 0.3rem; }
     }
   </style>
 </head>
@@ -119,6 +143,14 @@
   <main>
     <h1>Median sale price by city</h1>
     <p class="intro">Eighteen college towns in the College-town home sales dataset, ranked from highest to lowest median sale price.</p>
+
+    <div class="filter">
+      <label for="city-filter">City</label>
+      <select id="city-filter">
+        <option value="all" selected>All cities</option>
+      </select>
+      <span id="filter-count" class="filter-count" aria-live="polite"></span>
+    </div>
 
     <figure>
       <figcaption>Median sale price, by city</figcaption>
@@ -133,6 +165,17 @@
         <span></span>
       </div>
     </figure>
+
+    <section class="table-wrap">
+      <h2>Median sale price table</h2>
+      <table>
+        <caption class="visually-hidden" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Median sale price by city, matching the chart above</caption>
+        <thead>
+          <tr><th scope="col">City</th><th scope="col" class="num">Sales used</th><th scope="col" class="num">Median sale price</th></tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </section>
   </main>
 
   <footer>
@@ -142,26 +185,47 @@
 
   <script>
     (function () {
-      var AXIS_MAX = 1000000; // the axis runs from $0 to $1M
+      var AXIS_MAX = 1000000; // the axis runs from $0 to $1M, the same for every filter choice
       var DATA_URL = "data/city_median_sale_price.json";
       var list = document.getElementById("chart");
       var status = document.getElementById("status");
+      var select = document.getElementById("city-filter");
+      var count = document.getElementById("filter-count");
+      var tableBody = document.getElementById("table-body");
+
+      var cities = []; // kept in the file's order (highest median first); never re-sorted
 
       function money(n) {
         return "$" + Math.round(n).toLocaleString("en-US");
       }
 
-      function render(data) {
-        status.remove();
-        data.cities.forEach(function (c) {
+      function label(c) {
+        return c.city + ", " + c.state;
+      }
+
+      function fillFilter() {
+        var options = cities.slice().sort(function (a, b) {
+          return label(a).localeCompare(label(b));
+        });
+        options.forEach(function (c) {
+          var opt = document.createElement("option");
+          opt.value = label(c);
+          opt.textContent = label(c);
+          select.appendChild(opt);
+        });
+      }
+
+      function drawChart(visible) {
+        list.textContent = "";
+        visible.forEach(function (c) {
           var li = document.createElement("li");
           li.className = "row";
-          li.title = c.city + ", " + c.state + ": median " + money(c.median_sale_price) +
+          li.title = label(c) + ": median " + money(c.median_sale_price) +
             " from " + c.sales_used.toLocaleString("en-US") + " sales";
 
           var name = document.createElement("span");
           name.className = "name";
-          name.textContent = c.city + ", " + c.state;
+          name.textContent = label(c);
 
           var track = document.createElement("div");
           track.className = "track";
@@ -181,12 +245,54 @@
         });
       }
 
+      function drawTable(visible) {
+        tableBody.textContent = "";
+        visible.forEach(function (c) {
+          var tr = document.createElement("tr");
+
+          var tdCity = document.createElement("td");
+          tdCity.textContent = label(c);
+
+          var tdSales = document.createElement("td");
+          tdSales.className = "num";
+          tdSales.textContent = c.sales_used.toLocaleString("en-US");
+
+          var tdMedian = document.createElement("td");
+          tdMedian.className = "num";
+          tdMedian.textContent = money(c.median_sale_price);
+
+          tr.appendChild(tdCity);
+          tr.appendChild(tdSales);
+          tr.appendChild(tdMedian);
+          tableBody.appendChild(tr);
+        });
+      }
+
+      function applyFilter() {
+        var choice = select.value;
+        var visible = choice === "all" ? cities : cities.filter(function (c) {
+          return label(c) === choice;
+        });
+        drawChart(visible);
+        drawTable(visible);
+        count.textContent = choice === "all"
+          ? "Showing all " + cities.length + " cities"
+          : "Showing 1 of " + cities.length + " cities";
+      }
+
+      select.addEventListener("change", applyFilter);
+
       fetch(DATA_URL)
         .then(function (r) {
           if (!r.ok) throw new Error("HTTP " + r.status);
           return r.json();
         })
-        .then(render)
+        .then(function (data) {
+          cities = data.cities;
+          status.remove();
+          fillFilter();
+          applyFilter();
+        })
         .catch(function () {
           status.textContent = "The chart data could not be loaded.";
         });
